@@ -200,6 +200,8 @@ TEST_CASE("DriverDisconnectAndReconnect", "[hid][sdl]") {
   DriverFixture::DetachAll();
   X_INPUT_STATE state = {};
   CHECK(fixture.driver().GetState(0, &state) == X_ERROR_DEVICE_NOT_CONNECTED);
+  X_INPUT_RAW_STATE raw = {};
+  CHECK(fixture.driver().GetRawState(0, &raw) == X_ERROR_DEVICE_NOT_CONNECTED);
   X_INPUT_CAPABILITIES caps = {};
   CHECK(fixture.driver().GetCapabilities(0, 0, &caps) ==
         X_ERROR_DEVICE_NOT_CONNECTED);
@@ -326,12 +328,14 @@ void PollDoesNotWaitForSdl(const char* controller_subtypes) {
 
   X_INPUT_STATE guitar_during = {};
   X_INPUT_STATE second_during = {};
+  X_INPUT_RAW_STATE raw_during = {};
   X_RESULT keystroke_result = X_ERROR_SUCCESS;
   auto polls = std::async(std::launch::async, [&] {
     X_INPUT_KEYSTROKE keystroke = {};
     const bool ok =
         fixture.driver().GetState(0, &guitar_during) == X_ERROR_SUCCESS &&
-        fixture.driver().GetState(1, &second_during) == X_ERROR_SUCCESS;
+        fixture.driver().GetState(1, &second_during) == X_ERROR_SUCCESS &&
+        fixture.driver().GetRawState(0, &raw_during) == X_ERROR_SUCCESS;
     keystroke_result = fixture.driver().GetKeystroke(0, 0, &keystroke);
     return ok;
   });
@@ -346,6 +350,8 @@ void PollDoesNotWaitForSdl(const char* controller_subtypes) {
         0);
   CHECK(std::memcmp(&second_during, &second_before, sizeof(X_INPUT_STATE)) ==
         0);
+  CHECK(uint32_t(raw_during.packet_number) ==
+        uint32_t(guitar_before.packet_number));
 }
 
 TEST_CASE("DriverPollDoesNotWaitForSdl", "[hid][sdl]") {
@@ -414,8 +420,10 @@ void PollingSurvivesConnectCycles(const char* controller_subtypes) {
   std::thread guest([&] {
     while (!stop) {
       X_INPUT_STATE state = {};
+      X_INPUT_RAW_STATE raw = {};
       X_INPUT_CAPABILITIES caps = {};
       const X_RESULT result = fixture.driver().GetState(0, &state);
+      fixture.driver().GetRawState(0, &raw);
       fixture.driver().GetCapabilities(0, 0, &caps);
       if (result == X_ERROR_SUCCESS) {
         ++connected_polls;
@@ -548,6 +556,13 @@ TEST_CASE("DriverKeyboardFollowsSdlWithoutEvents", "[hid][sdl]") {
   CHECK(uint32_t(state.packet_number) != first_packet);
   CHECK(uint32_t(fixture.State().packet_number) ==
         uint32_t(state.packet_number));
+
+  // The raw report carries the same state and packet number.
+  X_INPUT_RAW_STATE raw = {};
+  REQUIRE(fixture.driver().GetRawState(0, &raw) == X_ERROR_SUCCESS);
+  CHECK(uint32_t(raw.packet_number) == uint32_t(state.packet_number));
+  CHECK(uint32_t(raw.data[2 + 4]) == 0x01);   // LX low: key 24
+  CHECK(uint32_t(raw.data[2 + 10]) == 0x80);  // RY low: overdrive
 }
 
 TEST_CASE("DriverKeyboardKeepsAnEventValue", "[hid][sdl]") {
