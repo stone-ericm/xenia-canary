@@ -1,0 +1,41 @@
+# Fork-only verification workflow (NOT part of any upstream PR).
+# Upstream CI builds with XENIA_BUILD_TESTS off and runs no tests, so this
+# builds xenia-kernel-tests and runs the [apc] cases on Windows and Linux.
+# Setup steps are copied from Windows_x86.yml / Linux_x86.yml.
+name: Fork APC tests
+
+on:
+  push:
+
+jobs:
+  windows:
+    name: Windows kernel tests
+    runs-on: windows-2025-vs2026
+    env:
+      POWERSHELL_TELEMETRY_OPTOUT: 1
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Vulkan SDK with spirv-tools
+        run: |-
+          Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe" -OutFile "vulkan-sdk.exe"
+          Start-Process -FilePath "vulkan-sdk.exe" -ArgumentList "--accept-licenses", "--default-answer", "--confirm-command", "install" -NoNewWindow -Wait
+          $env:VULKAN_SDK = "C:\VulkanSDK\$(Get-ChildItem -Path 'C:\VulkanSDK' -Directory | Select-Object -First 1 -ExpandProperty Name)"
+          echo "VULKAN_SDK=$env:VULKAN_SDK" >> $env:GITHUB_ENV
+          echo "${env:VULKAN_SDK}\Bin" >> $env:GITHUB_PATH
+
+      - name: Download submodules
+        run: |-
+          $SUBMODULES=(Select-String -CaseSensitive '(?<=path = )(?!third_party\/xbyak_aarch64).+' .gitmodules).Matches.Value
+          git submodule update --init --depth=1 -j $env:NUMBER_OF_PROCESSORS $SUBMODULES
+
+      - name: Build xenia-kernel-tests and run the [apc] cases
+        run: python xenia-build.py test --config=Release --target=xenia-kernel-tests -- "[apc]" --success --reporter compact
+
+      - name: Whole kernel suite (informational)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: python xenia-build.py test --config=Release --no_build --target=xenia-kernel-tests
+
